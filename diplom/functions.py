@@ -9,6 +9,8 @@ import datetime
 import io
 import contextlib
 from torchsummary import summary
+import torch
+import matplotlib.pyplot as plt
 
 
 def generate_spectre() -> Tuple[np.ndarray, Tuple[float, float, float, float, float]]:
@@ -27,8 +29,70 @@ def generate_spectre() -> Tuple[np.ndarray, Tuple[float, float, float, float, fl
     return np.expand_dims(result, axis=0), (alpha, imp, m, l, lmb)
 
 
+def generate_spectre_by_values(coeff: torch.Tensor):
+    coeff = coeff.tolist()
+
+    W = np.linspace(0, -0.7, num=256)
+    K = np.linspace(-0.4, 0.4, num=256)
+    k, w = np.meshgrid(K, W)
+    alpha = coeff[0]
+    imp = coeff[1]
+    m = coeff[2]
+    l = coeff[3]
+    lmb = coeff[4]
+
+    param = alpha * (w ** 2) + imp
+    result = param / (((1 - lmb) * w - (m * k ** 2 + l)) ** 2 + param ** 2)
+
+    return np.expand_dims(result, axis=0), (alpha, imp, m, l, lmb)
+
+
 def export_data(figure: Figure):
     figure.write_html(f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M')}.html")
+
+
+def show_diff(real: List[Tuple[np.ndarray, Tuple[float, float, float, float, float]]],
+              pred: List[Tuple[np.ndarray, Tuple[float, float, float, float, float]]]) -> None:
+    figure = make_subplots(rows=1, cols=2)
+
+    coeff = real[1]
+    figure.add_trace(go.Heatmap(z=real[0][0], showscale=False), row=1, col=1)
+    figure.add_annotation(
+        text=f"alpha={coeff[0]}<br>imp={coeff[1]}<br>m={coeff[2]}<br>l={coeff[3]}<br>lambda={coeff[4]}<br>Real",
+        xref="x domain",
+        yref="y domain",
+        col=1,
+        row=1,
+        y=-0.3,
+        showarrow=False
+    )
+
+    coeff = pred[1]
+    figure.add_trace(go.Heatmap(z=pred[0][0], showscale=False), row=1, col=2)
+    figure.add_annotation(
+        text=f"alpha={coeff[0]}<br>imp={coeff[1]}<br>m={coeff[2]}<br>l={coeff[3]}<br>lambda={coeff[4]}<br>Pred",
+        xref="x domain",
+        yref="y domain",
+        col=2,
+        row=1,
+        y=-0.3,
+        showarrow=False
+    )
+    figure.update_layout(
+        height=700,
+        margin=dict(t=50, b=150)
+    )
+
+    figure.show()
+
+
+def show_spectre(inp: Tuple[np.ndarray, Tuple[float, float, float, float, float]]) -> plt:
+
+    plt.imshow(inp[0].squeeze(), cmap='viridis', interpolation='nearest')
+    plt.colorbar(label="Intensity")  # Добавляем цветовую шкалу
+    plt.title("Heatmap using imshow()")
+
+    return plt
 
 
 def show_data(data: List[Tuple[np.ndarray, Tuple[float, float, float, float, float]]]) -> Figure:
@@ -39,7 +103,8 @@ def show_data(data: List[Tuple[np.ndarray, Tuple[float, float, float, float, flo
         row = (i // 5) + 1
         col = (i % 5) + 1
 
-        figure.add_trace(go.Heatmap(z=d[0][0], showscale=False), row=row, col=col)
+        figure.add_trace(go.Heatmap(z=d[0][0], showscale=False, colorscale=[[0, 'rgb(0,0,0)'], [1,'rgb(255,255,255)']]),
+                         row=row, col=col)
         figure.add_annotation(
             text=f"alpha={coeff[0]}<br>imp={coeff[1]}<br>m={coeff[2]}<br>l={coeff[3]}<br>lambda={coeff[4]}",
             xref="x domain",
