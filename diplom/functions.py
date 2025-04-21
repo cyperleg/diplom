@@ -11,24 +11,38 @@ import contextlib
 from torchsummary import summary
 import torch
 import matplotlib.pyplot as plt
+from torchmetrics import StructuralSimilarityIndexMeasure as SSIM
 
 
-def generate_spectre() -> Tuple[np.ndarray, Tuple[float, float, float, float, float]]:
+def generate_spectre(coeff: [torch.Tensor, tuple] = None) -> Tuple[np.ndarray, Tuple[float, float, float, float, float, float]]:
+
     W = np.linspace(0.05, -0.7, num=256)
     K = np.linspace(-0.4, 0.4, num=256)
     k, w = np.meshgrid(K, W)
-    alpha = random.uniform(2, 10)
-    imp = random.uniform(0.01, 1)
-    m = random.uniform(0, 10)
-    l = random.uniform(0, 1)
-    lmb = random.uniform(0, 10)
+
+    if coeff is None:
+        alpha = random.uniform(2, 10)
+        imp = random.uniform(0.01, 1)
+        m = random.uniform(0, 10)
+        l = random.uniform(0, 1)
+        lmb = random.uniform(0, 10)
+        shirley = random.uniform(0.1, 5)
+    else:
+        if isinstance(coeff, torch.Tensor):
+            coeff = coeff.tolist()
+        alpha = coeff[0]
+        imp = coeff[1]
+        m = coeff[2]
+        l = coeff[3]
+        lmb = coeff[4]
+        shirley = coeff[5]
+
 
     param = alpha * (w ** 2) + imp
     result = param / (((1 - lmb) * w - (m * k ** 2 + l)) ** 2 + param ** 2)
 
 
     # Shirli
-    shirley = random.uniform(0.1, 5)
     shirley_noise = shirley * w ** 2
 
     result += shirley_noise
@@ -36,66 +50,26 @@ def generate_spectre() -> Tuple[np.ndarray, Tuple[float, float, float, float, fl
     # Gause noise
     noise = np.random.normal(loc=0.0, scale=0.05, size=result.shape)
 
-    spectra_noise = result + ((noise / 2) * result)
+    spectra_noise = result + ((noise / 4) * result)
     spectra_noise = (spectra_noise - np.min(spectra_noise)) / (np.max(spectra_noise) - np.min(spectra_noise))
 
     # Fermi level
     kb = 8.617 * (10 ** (-5))
-    T = random.uniform(0, 300)
+    T = random.uniform(0, 250)
     Ef = 0
     exp = 1 / (np.exp((w + Ef) / (kb * T)) + 1)
 
     result = spectra_noise * exp
 
-    return np.expand_dims(result, axis=0), (alpha, imp, m, l, lmb)
-
-
-def generate_spectre_by_values(coeff: [torch.Tensor, tuple]):
-    if type(coeff) is not tuple:
-        coeff = coeff.tolist()
-
-    W = np.linspace(0.05, -0.7, num=256)
-    K = np.linspace(-0.4, 0.4, num=256)
-    k, w = np.meshgrid(K, W)
-    alpha = coeff[0]
-    imp = coeff[1]
-    m = coeff[2]
-    l = coeff[3]
-    lmb = coeff[4]
-
-    param = alpha * (w ** 2) + imp
-    result = param / (((1 - lmb) * w - (m * k ** 2 + l)) ** 2 + param ** 2)
-
-    # Shirli
-    shirley = random.uniform(0.1, 5)
-    shirley_noise = shirley * w ** 2
-
-    result += shirley_noise
-
-    # Gause noise
-    noise = np.random.normal(loc=0.0, scale=0.05, size=result.shape)
-
-    spectra_noise = result + ((noise / 2) * result)
-    spectra_noise = (spectra_noise - np.min(spectra_noise)) / (np.max(spectra_noise) - np.min(spectra_noise))
-
-    # Fermi level
-    kb = 8.617 * (10 ** (-5))
-    T = random.uniform(0, 300)
-    Ef = 0
-    exp = 1 / (np.exp((w + Ef) / (kb * T)) + 1)
-
-    result = spectra_noise * exp
-
-    return np.expand_dims(result, axis=0), (alpha, imp, m, l, lmb)
-
+    return np.expand_dims(result, axis=0), (alpha, imp, m, l, lmb, shirley)
 
 
 def export_data(figure: Figure):
     figure.write_html(f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M')}.html")
 
 
-def show_diff(real: List[Tuple[np.ndarray, Tuple[float, float, float, float, float]]],
-              pred: List[Tuple[np.ndarray, Tuple[float, float, float, float, float]]]) -> None:
+def show_diff(real: List[Tuple[np.ndarray, Tuple[float, float, float, float, float, float]]],
+              pred: List[Tuple[np.ndarray, Tuple[float, float, float, float, float, float]]], lv=None) -> None:
     figure = make_subplots(rows=1, cols=2)
 
     coeff = real[1]
@@ -142,15 +116,15 @@ def show_diff(real: List[Tuple[np.ndarray, Tuple[float, float, float, float, flo
     similarity = ssim(torch.stack([torch.tensor(real[0])]), torch.stack([torch.tensor(pred[0])]))
 
     figure.update_layout(
-        height=700,
+        height=600,
         margin=dict(t=50, b=150),
-        title_text=f"similarity = {similarity}"
+        title_text=f"similarity = {similarity}" if lv is None else f"similarity = {similarity} LV{lv}K"
     )
 
     figure.show()
 
 
-def show_spectre(inp: Tuple[np.ndarray, Tuple[float, float, float, float, float]]) -> plt:
+def show_spectre(inp: Tuple[np.ndarray, Tuple[float, float, float, float, float, float]]) -> plt:
 
     plt.imshow(inp[0].squeeze(), cmap='viridis', interpolation='nearest')
     plt.colorbar(label="Intensity")  # Добавляем цветовую шкалу
@@ -159,7 +133,7 @@ def show_spectre(inp: Tuple[np.ndarray, Tuple[float, float, float, float, float]
     return plt
 
 
-def show_data(data: List[Tuple[np.ndarray, Tuple[float, float, float, float, float]]], num_cols=5) -> Figure:
+def show_data(data: List[Tuple[np.ndarray, Tuple[float, float, float, float, float, float]]], num_cols=5, title=None) -> Figure:
     figure = make_subplots(rows=len(data) // num_cols, cols=num_cols)
 
     for i, d in enumerate(data):
@@ -184,6 +158,11 @@ def show_data(data: List[Tuple[np.ndarray, Tuple[float, float, float, float, flo
         margin=dict(t=50, b=100)
     )
 
+    if title is not None:
+        figure.update_layout(
+            title_text=f"{title}"
+        )
+
     figure.show()
 
     return figure
@@ -202,7 +181,7 @@ def time_tracker(func):
 
 @time_tracker
 def check():
-    values = [generate_spectre() for _ in range(50000)]
+    values = [generate_spectre() for _ in range(5000)]
 
 
 def get_model_summary(modell, input_size):
@@ -213,7 +192,7 @@ def get_model_summary(modell, input_size):
 
 
 if __name__ == "__main__":
-    from torchmetrics import StructuralSimilarityIndexMeasure as SSIM
-    test_spectre, params = generate_spectre()
-    recreated_spectre, params = generate_spectre_by_values(params)
-    show_diff((test_spectre, params), (recreated_spectre, params))
+    # test_spectre, params = generate_spectre()
+    # recreated_spectre, params = generate_spectre(params)
+    # show_diff((test_spectre, params), (recreated_spectre, params))
+    show_data([generate_spectre() for _ in range(5)], title="square")
